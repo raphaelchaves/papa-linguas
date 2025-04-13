@@ -1,0 +1,6 @@
+streamlit
+gensim
+requests
+numpy
+scikit-learn
+joblib
