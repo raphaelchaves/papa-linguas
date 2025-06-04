@@ -8,45 +8,32 @@ from scipy.special import softmax
 import plotly.graph_objects as go
 import pandas as pd
 
-# ========================
-# 🔽 Baixar e extrair modelo do Google Drive
-# ========================
+device = torch.device("cpu")  # Forçar cpu
+
 zip_url = "https://drive.google.com/uc?id=1dBOrHADVqiI3qeLdPwsG_yu1Mk7DdsOh"
 zip_path = "/tmp/transformer_model.zip"
 model_dir = "/tmp/transformer_model"
 
-if not os.path.exists(model_dir):
-    gdown.download(zip_url, zip_path, quiet=False)
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(model_dir)
+@st.cache_resource
+def load_model_and_tokenizer():
+    if not os.path.exists(model_dir):
+        gdown.download(zip_url, zip_path, quiet=False)
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(model_dir)
 
-# ========================
-# ⚙️ Carregar modelo e tokenizer
-# ========================
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-tokenizer = AutoTokenizer.from_pretrained(model_dir)
-model = AutoModelForSequenceClassification.from_pretrained(
-    model_dir,
-    local_files_only=True,
-    trust_remote_code=True,
-    use_safetensors=True
-).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(model_dir)
+    model = AutoModelForSequenceClassification.from_pretrained(
+        model_dir,
+        local_files_only=True,
+        trust_remote_code=True,
+        use_safetensors=True
+    ).to(device)
+    return model, tokenizer
 
+model, tokenizer = load_model_and_tokenizer()
 
-# Função para estilizar o DataFrame com base na classificação
-def highlight_sentiment(row):
-    if row["Classificação"] == "Positivo":
-        return ['background-color: green; color: white'] * len(row)
-    elif row["Classificação"] == "Negativo":
-        return ['background-color: yellow; color: black'] * len(row)
-    else:
-        return [''] * len(row)
-
-# Função de predição com probabilidades
 def predict_sentiment_probability(text, model_to_use, tokenizer_to_use, device_to_use):
-    model_to_use.to(device_to_use)
     model_to_use.eval()
-
     inputs = tokenizer_to_use(
         text,
         return_tensors="pt",
