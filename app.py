@@ -1,102 +1,221 @@
+import os
+import gdown
+import zipfile
 import streamlit as st
-import requests
-import numpy as np
-from gensim.models import Word2Vec
-from sklearn.linear_model import LogisticRegression
-import joblib
-import io
+import torch
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from scipy.special import softmax
+import plotly.graph_objects as go
+import pandas as pd
 
-# Links dos arquivos no Google Drive
-links = {
-    "word2vec_model.bin": "https://drive.google.com/uc?id=1EZGEyBJdICy4tr6wsDx5X0RkLV_4-otC",
-    "word2vec_model.bin.wv.vectors.npy": "https://drive.google.com/uc?id=1-WXfUuuN51J23X1J43LKB5gKPkn_IaRB",
-    "word2vec_model.bin.syn1neg.npy": "https://drive.google.com/uc?id=1Vh5ST2IfvSffJkd__uswFAmqk2KSudGf",
-    "logistic_regression_model.joblib": "https://drive.google.com/uc?id=1Jd-U9xITcGIHCgpfb-q0jzRk8a99S-k0"
-}
+# ========================
+# 🔽 Baixar e extrair modelo do Google Drive
+# ========================
+zip_url = "https://drive.google.com/uc?id=1dBOrHADVqiI3qeLdPwsG_yu1Mk7DdsOh"
+zip_path = "/tmp/transformer_model.zip"
+model_dir = "/tmp/transformer_model"
 
-# Função para baixar arquivos como bytes
-def download_file_as_bytes(url):
-    response = requests.get(url)
-    response.raise_for_status()
-    return io.BytesIO(response.content)
+if not os.path.exists(model_dir):
+    gdown.download(zip_url, zip_path, quiet=False)
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(model_dir)
 
-# Carregar o modelo Word2Vec diretamente da memória
-model_bin = download_file_as_bytes(links["word2vec_model.bin"])
-vectors_npy = download_file_as_bytes(links["word2vec_model.bin.wv.vectors.npy"])
-syn1neg_npy = download_file_as_bytes(links["word2vec_model.bin.syn1neg.npy"])
+# ========================
+# ⚙️ Carregar modelo e tokenizer
+# ========================
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+tokenizer = AutoTokenizer.from_pretrained(model_dir)
+model = AutoModelForSequenceClassification.from_pretrained(
+    model_dir,
+    local_files_only=True,
+    trust_remote_code=True,
+    use_safetensors=True
+).to(device)
 
-with open("word2vec_model.bin", "wb") as f:
-    f.write(model_bin.getbuffer())
-with open("word2vec_model.bin.wv.vectors.npy", "wb") as f:
-    f.write(vectors_npy.getbuffer())
-with open("word2vec_model.bin.syn1neg.npy", "wb") as f:
-    f.write(syn1neg_npy.getbuffer())
 
-model_w2v = Word2Vec.load("word2vec_model.bin")
-
-# Carregar o modelo Logistic Regression diretamente da memória
-logistic_model_bytes = download_file_as_bytes(links["logistic_regression_model.joblib"])
-logistic_regression_model = joblib.load(logistic_model_bytes)
-
-# Função para calcular o vetor da nova frase
-def preprocess_and_vectorize(sentence):
-    # Tokenizar e fazer o pré-processamento (ajustar conforme necessário)
-    words = sentence.split()  # Ajuste conforme seu método de tokenização
-    words = [word for word in words if word in model_w2v.wv]  # Filtrar palavras que estão no modelo
-    if words:
-        return np.mean(model_w2v.wv[words], axis=0)
+# Função para estilizar o DataFrame com base na classificação
+def highlight_sentiment(row):
+    if row["Classificação"] == "Positivo":
+        return ['background-color: green; color: white'] * len(row)
+    elif row["Classificação"] == "Negativo":
+        return ['background-color: yellow; color: black'] * len(row)
     else:
-        return np.zeros(model_w2v.vector_size)
+        return [''] * len(row)
 
-# Estilo CSS para adicionar a imagem de fundo
+# Função de predição com probabilidades
+def predict_sentiment_probability(text, model_to_use, tokenizer_to_use, device_to_use):
+    model_to_use.to(device_to_use)
+    model_to_use.eval()
+
+    inputs = tokenizer_to_use(
+        text,
+        return_tensors="pt",
+        truncation=True,
+        padding=True,
+        max_length=512
+    )
+    inputs = {key: val.to(device_to_use) for key, val in inputs.items()}
+
+    with torch.no_grad():
+        outputs = model_to_use(**inputs)
+
+    logits = outputs.logits
+    probabilities = softmax(logits.cpu().numpy(), axis=1)[0]
+
+    prob_negativa = probabilities[0]
+    prob_positiva = probabilities[1]
+
+    return {
+        "texto": text,
+        "probabilidade_negativo": prob_negativa * 100,
+        "probabilidade_positivo": prob_positiva * 100,
+        "sentimento_predito": "Positivo" if prob_positiva > prob_negativa else "Negativo",
+        "score_predito_positivo": prob_positiva
+    }
+
+# Estilo CSS
 page_bg_img = """
 <style>
 .stApp {
-    background-image: url("https://github.com/raphaelchaves/papa-linguas/blob/main/background_picture.jpg");
-    background-size: cover;
-    background-position: center;
-    background-repeat: no-repeat;
-    background-attachment: fixed;
+    background-color: #f7f7f7;
+    color: black;
+}
+div.stButton > button {
+    color: black;
+    background-color: #d1d1d1;
+    padding: 10px 20px;
+    border-radius: 5px;
 }
 </style>
 """
 st.markdown(page_bg_img, unsafe_allow_html=True)
 
-# Adicionar barra lateral
+sidebar_style = """
+<style>
+[data-testid="stSidebar"] {
+    background-color: #f0f2f6;
+    padding: 10px;
+    border-radius: 10px;
+}
+[data-testid="stSidebar"] * {
+    color: black;
+}
+</style>
+"""
+st.markdown(sidebar_style, unsafe_allow_html=True)
+
+# Barra lateral
+st.sidebar.image(
+    "https://github.com/raphaelchaves/papa-linguas/raw/main/ICMC.png",
+    width=150
+)
 st.sidebar.title("Sobre o App")
 st.sidebar.info(
     """
-    Este app utiliza modelos de **Word2Vec** e **Regressão Logística** 
-    para análise de sentimento em frases. Insira uma frase no campo ao lado e clique em **Analisar Sentimento**.
+    Este APP foi desenvolvido para a disciplina de **PLN Linguagem Natural - SCC0633-SCC5908**.
     """
 )
 st.sidebar.subheader("Componentes do Grupo:")
-st.sidebar.write("- Raphael Franco Chaves")
+st.sidebar.write("- Érica Ribeiro")
+st.sidebar.write("- Júnior Fernandes Marques")
 st.sidebar.write("- Luís Vogel")
-st.sidebar.write("- Thiago")
-st.sidebar.write("- Marlon Martins")
-st.sidebar.write("- Érica")
-st.sidebar.write("- Júnior")
+st.sidebar.write("- Marlon José Martins")
+st.sidebar.write("- Raphael Franco Chaves")
+st.sidebar.write("- Thiago Ambiel")
 
-# Streamlit interface
-st.title("Grupo Papas-Língua")
-st.write("Digite uma frase para análise de sentimento:")
+st.sidebar.subheader("Docentes:")
+st.sidebar.write("- Thiago Alexandre Salgueiro Pardo")
+st.sidebar.write("- Renato Moraes Silva")
 
-# Input de texto para o usuário
-sentence = st.text_area("Digite a frase", "")
+# Interface principal
+st.title("Grupo Papa-Línguas")
+st.write("Os Segredos da Análise de Sentimentos: Uma abordagem prática para o cálculo de probabilidades")
 
-# Botão para realizar a análise
-if st.button('Analisar Sentimento'):
-    # Calcular o vetor para a nova frase
-    sentence_vector = preprocess_and_vectorize(sentence)
+input_type = st.sidebar.radio("Escolha o tipo de entrada:", ("Texto", "Arquivo"))
 
-    # Fazer a previsão
-    y_prob = logistic_regression_model.predict_proba([sentence_vector])[0]  # Probabilidades para a nova frase
-    y_pred = logistic_regression_model.predict([sentence_vector])[0]
+if input_type == "Texto":
+    sentence = st.text_area("Digite a frase que deseja analisar:", "")
 
-    # Interpretação do resultado
-    sentiment = "Positivo" if y_pred == 0 else "Negativo"  # Ajuste conforme suas classes
+    if st.button('Analisar Sentimento'):
+        resultado = predict_sentiment_probability(sentence, model, tokenizer, device)
+        sentiment = resultado["sentimento_predito"]
+        label_color = "green" if sentiment == "Positivo" else "yellow"
 
-    # Exibir os resultados
-    st.write(f"Sentimento: {sentiment}")
-    st.write(f"Probabilidades: Positivo: {y_prob[0]:.4f}, Negativo: {y_prob[1]:.4f}")
+        st.markdown(
+            f"""
+            <div style="
+                background-color: {label_color};
+                padding: 10px;
+                border-radius: 10px;
+                text-align: center;
+                color: black;
+                font-size: 18px;
+                font-weight: bold;
+            ">
+                Resultado Final: Sentimento {sentiment}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        labels = ["Positivo", "Negativo"]
+        values = [resultado["probabilidade_positivo"], resultado["probabilidade_negativo"]]
+        colors = ["green", "yellow"]
+
+        fig = go.Figure(data=[
+            go.Bar(x=labels, y=values, marker_color=colors)
+        ])
+        fig.update_layout(
+            title="Probabilidades Estimadas",
+            xaxis_title="Tipo de Sentimento",
+            yaxis_title="% Probabilidade",
+            template="simple_white",
+            plot_bgcolor="#f7f7f7",
+            paper_bgcolor="#f7f7f7"
+        )
+
+        st.plotly_chart(fig)
+
+elif input_type == "Arquivo":
+    uploaded_file = st.file_uploader("Envie um arquivo CSV ou Excel (XLSX):", type=["csv", "xlsx"])
+
+    if uploaded_file:
+        if uploaded_file.name.endswith(".csv"):
+            df = pd.read_csv(uploaded_file)
+        elif uploaded_file.name.endswith(".xlsx"):
+            df = pd.read_excel(uploaded_file)
+
+        st.write("Visualização do arquivo:")
+        st.dataframe(df.head())
+
+        if 'comentario' in df.columns:
+            if st.button("Analisar Comentários"):
+                probabilidades_positivas = []
+                probabilidades_negativas = []
+                classificacoes = []
+
+                for comentario in df['comentario']:
+                    comentario_str = str(comentario)
+                    resultado = predict_sentiment_probability(comentario_str, model, tokenizer, device)
+                    sentiment = resultado["sentimento_predito"]
+
+                    probabilidades_positivas.append(resultado["probabilidade_positivo"] / 100)
+                    probabilidades_negativas.append(resultado["probabilidade_negativo"] / 100)
+                    classificacoes.append(sentiment)
+
+                df['Probabilidade Positivo'] = probabilidades_positivas
+                df['Probabilidade Negativo'] = probabilidades_negativas
+                df['Classificação'] = classificacoes
+
+                #st.write("Resultados da Análise:")
+                #st.dataframe(df, use_container_width=True)
+                
+                st.write("Resultados da Análise:")
+                styled_df = df.style.apply(highlight_sentiment, axis=1)
+                st.dataframe(styled_df, use_container_width=True)
+
+                csv = df.to_csv(index=False)
+                st.download_button("Baixar Resultados (CSV)", csv, "resultados.csv", "text/csv")
+        else:
+            st.warning("O arquivo enviado não contém a coluna 'comentario'. Verifique e tente novamente.")
+
