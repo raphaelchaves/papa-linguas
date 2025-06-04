@@ -23,14 +23,14 @@ if not os.path.exists(model_dir):
 # ========================
 # ⚙️ Carregar modelo e tokenizer
 # ========================
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 model = AutoModelForSequenceClassification.from_pretrained(
-    model_dir,
+    transformer_model_path,
     local_files_only=True,
     trust_remote_code=True,
     use_safetensors=True
-).to(device)
+).to(device)  # device é cpu, então ok
 
 
 # Função para estilizar o DataFrame com base na classificação
@@ -218,4 +218,3 @@ elif input_type == "Arquivo":
                 st.download_button("Baixar Resultados (CSV)", csv, "resultados.csv", "text/csv")
         else:
             st.warning("O arquivo enviado não contém a coluna 'comentario'. Verifique e tente novamente.")
-
