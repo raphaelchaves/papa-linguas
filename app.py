@@ -32,6 +32,14 @@ def load_model_and_tokenizer():
 
 model, tokenizer = load_model_and_tokenizer()
 
+def highlight_sentiment(row):
+    if row["Classificação"] == "Positivo":
+        return ['background-color: green; color: white'] * len(row)
+    elif row["Classificação"] == "Negativo":
+        return ['background-color: yellow; color: black'] * len(row)
+    else:
+        return [''] * len(row)
+        
 def predict_sentiment_probability(text, model_to_use, tokenizer_to_use, device_to_use):
     model_to_use.eval()
     inputs = tokenizer_to_use(
