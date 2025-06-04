@@ -23,14 +23,14 @@ if not os.path.exists(model_dir):
 # ========================
 # ⚙️ Carregar modelo e tokenizer
 # ========================
-device = torch.device("cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 tokenizer = AutoTokenizer.from_pretrained(model_dir)
 model = AutoModelForSequenceClassification.from_pretrained(
-    transformer_model_path,
+    model_dir,
     local_files_only=True,
     trust_remote_code=True,
     use_safetensors=True
-).to(device)  # device é cpu, então ok
+).to(device)
 
 
 # Função para estilizar o DataFrame com base na classificação
