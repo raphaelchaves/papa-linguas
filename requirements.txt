@@ -613,3 +613,10 @@ yfinance==0.2.55
 zict==3.0.0
 zipp==3.21.0
 zstandard==0.23.0
+transformers
+torch
+scipy
+pandas
+plotly
+gdown
+streamlit
