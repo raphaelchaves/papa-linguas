@@ -249,6 +249,7 @@ def main():
     fonte = st.radio("Fonte de Dados:", ("Gerar dados aleatórios", "Importar CSV"))
 
     data = []
+    selected_column = None
 
     if fonte == "Gerar dados aleatórios":
         n = st.number_input("Quantidade de dados (n)", min_value=10, max_value=100000, value=1000)
@@ -260,33 +261,39 @@ def main():
             generator = DataGenerator(n, low, high, mode, seed)
             data[:] = generator.generate()
             st.success(f"Gerados {len(data)} dados.")
+            selected_column = None  # Não aplicável
 
     else:
         uploaded_file = st.file_uploader("Escolha um arquivo CSV", type=["csv"])
-        column_name = st.text_input("Nome da coluna numérica para análise")
         distribution_mode = st.selectbox("Distribuição para aplicar sobre dados importados", ["Nenhuma", "uniform", "normal"])
-        if st.button("Importar CSV"):
-            if uploaded_file is not None and column_name:
-                data = read_csv_from_upload(uploaded_file, column_name)
-                if data:
-                    data_np = np.array(data)
-                    if distribution_mode == "uniform":
-                        # normaliza para 0..1
-                        data_np = (data_np - data_np.min()) / (data_np.max() - data_np.min())
-                        # escala para intervalo original
-                        data_np = data_np * (data_np.max() - data_np.min()) + data_np.min()
-                        data = list(data_np)
-                    elif distribution_mode == "normal":
-                        # transformar dados para ter média e desvio padrão da normal original carregada
-                        mean = np.mean(data_np)
-                        std = np.std(data_np)
-                        data_np = np.random.normal(loc=mean, scale=std, size=len(data_np))
-                        data = list(data_np)
-                    st.success(f"Lidos {len(data)} valores da coluna '{column_name}' com distribuição '{distribution_mode}'.")
+
+        if uploaded_file is not None:
+            # Ler dataframe usando pandas para facilitar manipulação
+            import pandas as pd
+            df = pd.read_csv(uploaded_file)
+            columns = df.columns.tolist()
+            selected_column = st.selectbox("Selecione a variável para análise:", columns)
+            if selected_column:
+                data_raw = df[selected_column].dropna().tolist()
+                data_np = np.array(data_raw)
+                if distribution_mode == "uniform":
+                    data_np = (data_np - data_np.min()) / (data_np.max() - data_np.min())
+                    data_np = data_np * (data_np.max() - data_np.min()) + data_np.min()
+                    data = list(data_np)
+                elif distribution_mode == "normal":
+                    mean = np.mean(data_np)
+                    std = np.std(data_np)
+                    data_np = np.random.normal(loc=mean, scale=std, size=len(data_np))
+                    data = list(data_np)
+                else:
+                    data = data_raw
+                st.success(f"Lidos {len(data)} valores da variável '{selected_column}' com distribuição '{distribution_mode}'.")
+
+        else:
+            selected_column = None
 
     if data:
         normalize_data = st.checkbox("Normalizar dados entre 0 e 1", value=True)
-
         metrics = [
             Mean(),
             Median(),
